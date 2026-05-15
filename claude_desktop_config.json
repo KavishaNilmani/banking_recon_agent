@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "billing-recon": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "d:\\OneDrive - Lowcode Minds Technology Pvt Ltd\\Desktop\\banking_recon_agent",
+        "run",
+        "mcp_server.py"
+      ]
+    }
+  }
+}

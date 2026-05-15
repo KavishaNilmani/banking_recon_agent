@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "billing-recon": {
+      "command": "python",
+      "args": ["mcp_server.py"]
+    }
+  }
+}

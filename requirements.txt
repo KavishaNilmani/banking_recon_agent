@@ -1,0 +1,7 @@
+anthropic
+openai
+mcp
+pandas
+openpyxl
+python-dotenv
+uvicorn
