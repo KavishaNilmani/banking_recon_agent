@@ -1,6 +1,6 @@
 """
-MCP Server — Billing Reconciliation Agent
-Exposes all 13 billing reconciliation tools via the Model Context Protocol (stdio transport).
+MCP Server — Generic Billing Reconciliation Agent
+Exposes all 14 generic billing reconciliation tools via the Model Context Protocol (stdio transport).
 
 Configure in Claude Code CLI:  .claude/settings.json  (project-level)
 Configure in Claude Desktop:   see claude_desktop_config.json at project root
@@ -13,7 +13,6 @@ import asyncio
 import os
 import sys
 
-# Ensure the project root is on sys.path so src.* imports resolve correctly
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dotenv import load_dotenv
@@ -26,12 +25,12 @@ from mcp import types
 from src.utils.tool_registry import TOOL_DEFINITIONS, execute_tool
 
 
-server = Server("billing-recon-agent")
+server = Server("generic-billing-recon")
 
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
-    """Expose all 13 billing reconciliation MCP tools."""
+    """Expose all 14 generic billing reconciliation MCP tools."""
     return [
         types.Tool(
             name=td["name"],
@@ -44,7 +43,7 @@ async def list_tools() -> list[types.Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    """Dispatch a tool call to the billing reconciliation engine."""
+    """Dispatch a tool call to the generic billing reconciliation engine."""
     result_json = execute_tool(name, arguments or {})
     return [types.TextContent(type="text", text=result_json)]
 

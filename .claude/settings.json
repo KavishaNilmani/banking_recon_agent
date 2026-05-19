@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "billing-recon": {
+    "generic-billing-recon": {
       "command": "python",
       "args": ["mcp_server.py"]
     }

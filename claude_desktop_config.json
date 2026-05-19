@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "billing-recon": {
+    "generic-billing-recon": {
       "command": "uv",
       "args": [
         "--directory",

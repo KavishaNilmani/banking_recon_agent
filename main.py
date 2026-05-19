@@ -1,8 +1,8 @@
 """
-Billing Reconciliation Agent — Entry Point
+Generic Billing Reconciliation Agent — Entry Point
 
 Usage:
-    python main.py --prompt "Reconcile ACH payments from input/bank_recon.xlsx"
+    python main.py --prompt "I want to do ACH reconciliation. In input/bank_recon.xlsx ..."
     python main.py  (interactive prompt)
     python main.py --prompt "..." --output output/my_run
 """
@@ -15,9 +15,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Require at least one LLM provider to be configured
-_azure_vars = ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT")
-_has_azure  = all(os.environ.get(v) for v in _azure_vars)
+_azure_vars    = ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_DEPLOYMENT")
+_has_azure     = all(os.environ.get(v) for v in _azure_vars)
 _has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 if not _has_azure and not _has_anthropic:
@@ -31,14 +30,19 @@ from src.agents.billing_agent import BillingReconAgent
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Billing Reconciliation Agent — reconcile ACH, ECHECK, CARD, and CHECK payments"
+        description=(
+            "Generic Billing Reconciliation Agent — reconcile any two data sources "
+            "in any Excel workbook using a natural language prompt."
+        )
     )
     parser.add_argument(
         "--prompt",
         default="",
         help=(
             "Natural language reconciliation instruction. "
-            'Example: "Reconcile ACH payments from input/bank_recon.xlsx using the AR sheet and JP/FC bank sheets."'
+            'Example: "I want to do ACH reconciliation. In input/bank_recon.xlsx, '
+            'match the AR sheet Check+Amount+Date against ACH-JP sheet, '
+            'fill Bank=JP, Bank date from ACH-JP Date, Amount Cleared from ACH-JP Amount."'
         ),
     )
     parser.add_argument(
@@ -50,10 +54,9 @@ def main() -> None:
 
     user_prompt = args.prompt.strip()
     if not user_prompt:
-        print("Billing Reconciliation Agent")
+        print("Generic Billing Reconciliation Agent")
         print("-" * 40)
         print("Enter your reconciliation instruction (or Ctrl+C to exit):")
-        print('Example: "Reconcile ACH payments from input/bank_recon.xlsx"')
         print()
         try:
             user_prompt = input("Prompt: ").strip()

@@ -1,11 +1,16 @@
 """
-MCP Tool 12 — Report Generator
-Creates a multi-sheet Excel report:
-  Sheet 1: Reconciliation Results  (colour-coded by status)
-  Sheet 2: Exception Report
-  Sheet 3: Bank Orphans
-  Sheet 4: Audit Log
-  Sheet 5: Dashboard Summary
+MCP Tool 13 — Report Generator
+Creates a multi-sheet Excel report.
+
+Generic mode (output_columns in config):
+  Sheet 1: Recon Results      — user-specified columns + Status + Reasoning (colour-coded)
+  Sheet 2: Matched List       — clean table of MATCHED rows with output_columns only
+  Sheet 3: Exception Report
+  Sheet 4: Bank Orphans
+  Sheet 5: Audit Log
+  Sheet 6: Dashboard Summary
+
+Legacy mode (no output_columns): uses default banking column layout.
 """
 
 import os
@@ -24,13 +29,14 @@ GREY   = PatternFill("solid", fgColor="F2F2F2")
 BLUE_H = PatternFill("solid", fgColor="1F497D")
 BROWN  = PatternFill("solid", fgColor="7B3F00")
 DASH   = PatternFill("solid", fgColor="D9E1F2")
+TEAL_H = PatternFill("solid", fgColor="17375E")
 
 
 def _hdr(ws, row, cols, fill):
     for c, h in enumerate(cols, 1):
         cell = ws.cell(row=row, column=c, value=h)
         cell.fill = fill
-        cell.font = Font(bold=True, color="FFFFFF" if fill != DASH else "000000")
+        cell.font = Font(bold=True, color="FFFFFF" if fill not in (DASH,) else "000000")
         cell.alignment = Alignment(horizontal="center")
 
 
@@ -48,9 +54,24 @@ def _auto_width(ws):
         ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 2, 45)
 
 
+def _get_val_from_record(ar: dict, custom_fill: dict, col_name: str):
+    """Look up a column value — checks custom_fill first, then AR record (raw and normalised)."""
+    v = custom_fill.get(col_name)
+    if v is not None:
+        return v
+    v = ar.get(col_name)
+    if v is not None:
+        return v
+    # Try lowercase / underscore variant (canonical name)
+    v = ar.get(col_name.lower())
+    if v is not None:
+        return v
+    return ar.get(col_name.lower().replace(" ", "_"), "")
+
+
 def generate_report(output_dir: str = "output") -> dict:
     """
-    Write the final multi-sheet Excel reconciliation report.
+    Write the final reconciliation Excel report.
     Call this after log_audit.
     """
     st      = state.get()
@@ -62,81 +83,124 @@ def generate_report(output_dir: str = "output") -> dict:
     b_recs  = st["classified"].get("bank", [])
 
     if not ar_recs:
-        return {"error": "No classified AR records."}
+        return {"error": "No classified source records."}
     if not dec:
         return {"error": "No decisions recorded. Call update_records first."}
 
     os.makedirs(output_dir, exist_ok=True)
-    ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
     ptype = config.get("payment_type", "RECON").upper()
-    path = os.path.join(output_dir, f"{ptype.lower()}_recon_{ts}.xlsx")
+    path  = os.path.join(output_dir, f"{ptype.lower()}_recon_{ts}.xlsx")
 
-    wb = Workbook()
+    wb           = Workbook()
     decision_map = {d["ar_index"]: d for d in dec}
 
+    # Determine output columns
+    output_columns = config.get("output_columns", [])
+    generic_mode   = bool(output_columns)
+
+    if generic_mode:
+        recon_hdrs = output_columns + ["Status", "Agent Reasoning"]
+    else:
+        recon_hdrs = [
+            "AR Index", "Client", "Date", "Check/Ref", "AR Amount",
+            "Status", "Bank", "Bank Date", "Cleared Amt", "Open Amt",
+            "Remarks 1", "Remarks 2", "Agent Reasoning",
+        ]
+
     # -----------------------------------------------------------------------
-    # Sheet 1 — Reconciliation Results
+    # Sheet 1 — Recon Results
     # -----------------------------------------------------------------------
     ws1 = wb.active
     ws1.title = "Recon Results"
-    hdrs = ["AR Index", "Client", "Date", "Check/Ref", "AR Amount",
-            "Status", "Bank", "Bank Date", "Cleared Amt", "Open Amt",
-            "Remarks 1", "Remarks 2", "Agent Reasoning"]
-    _hdr(ws1, 1, hdrs, BLUE_H)
+    _hdr(ws1, 1, recon_hdrs, BLUE_H)
 
     row = 2
     for i, ar in enumerate(ar_recs):
-        d = decision_map.get(i, {})
-        status = d.get("status", "PENDING")
-        vals = [
-            i,
-            ar.get("client_id") or ar.get("client") or "",
-            ar.get("date", ""),
-            ar.get("check") or ar.get("cust_ref") or "",
-            ar.get("amount"),
-            status,
-            d.get("bank", ""),
-            d.get("bank_date", ""),
-            d.get("cleared_amount", ""),
-            d.get("open_amount", ""),
-            d.get("remarks_1", ""),
-            d.get("remarks_2", ""),
-            d.get("reasoning", ""),
-        ]
+        d           = decision_map.get(i, {})
+        status      = d.get("status", "PENDING")
+        custom_fill = d.get("custom_fill", {})
+
+        if generic_mode:
+            vals = [_get_val_from_record(ar, custom_fill, col) for col in output_columns]
+            vals += [status, d.get("reasoning", "")]
+        else:
+            vals = [
+                i,
+                ar.get("client_id") or ar.get("client") or "",
+                ar.get("date", ""),
+                ar.get("check") or ar.get("cust_ref") or "",
+                ar.get("amount"),
+                status,
+                d.get("bank", ""),
+                d.get("bank_date", ""),
+                d.get("cleared_amount", ""),
+                d.get("open_amount", ""),
+                d.get("remarks_1", ""),
+                d.get("remarks_2", ""),
+                d.get("reasoning", ""),
+            ]
+
         for c, v in enumerate(vals, 1):
             ws1.cell(row=row, column=c, value=v).alignment = Alignment(wrap_text=False)
         fill = GREEN if status == "MATCHED" else RED if status == "UNMATCHED" else YELLOW if status == "PARTIAL" else GREY
-        _fill_row(ws1, row, len(hdrs), fill)
+        _fill_row(ws1, row, len(recon_hdrs), fill)
         row += 1
 
     _auto_width(ws1)
     ws1.freeze_panes = "A2"
 
     # -----------------------------------------------------------------------
-    # Sheet 2 — Exception Report
+    # Sheet 2 — Matched List (generic mode only — clean summary of matches)
     # -----------------------------------------------------------------------
-    ws2 = wb.create_sheet("Exceptions")
-    e_hdrs = ["Type", "AR Index", "Bank Index", "Bank Sheet", "AR Amount", "Bank Amount", "Difference", "Detail"]
-    _hdr(ws2, 1, e_hdrs, BROWN)
+    if generic_mode:
+        ws_match        = wb.create_sheet("Matched List")
+        matched_hdrs    = output_columns + ["Reasoning"]
+        _hdr(ws_match, 1, matched_hdrs, TEAL_H)
+
+        match_row = 2
+        for i, ar in enumerate(ar_recs):
+            d = decision_map.get(i, {})
+            if d.get("status") not in ("MATCHED", "PARTIAL"):
+                continue
+            custom_fill = d.get("custom_fill", {})
+            vals = [_get_val_from_record(ar, custom_fill, col) for col in output_columns]
+            vals.append(d.get("reasoning", ""))
+            for c, v in enumerate(vals, 1):
+                ws_match.cell(row=match_row, column=c, value=v)
+            _fill_row(ws_match, match_row, len(matched_hdrs), GREEN)
+            match_row += 1
+
+        _auto_width(ws_match)
+        ws_match.freeze_panes = "A2"
+        matched_sheet_name = "Matched List"
+    else:
+        matched_sheet_name = None
+
+    # -----------------------------------------------------------------------
+    # Sheet 3 — Exception Report
+    # -----------------------------------------------------------------------
+    ws_exc  = wb.create_sheet("Exceptions")
+    e_hdrs  = ["Type", "AR Index", "Bank Index", "Bank Sheet", "AR Amount", "Bank Amount", "Difference", "Detail"]
+    _hdr(ws_exc, 1, e_hdrs, BROWN)
 
     for row_i, e in enumerate(exc, 2):
         vals = [
             e.get("type"), e.get("ar_index"), e.get("bank_index"), e.get("bank_sheet"),
-            e.get("ar_amount"), e.get("bank_amount"),
-            e.get("difference"), e.get("detail"),
+            e.get("ar_amount"), e.get("bank_amount"), e.get("difference"), e.get("detail"),
         ]
         for c, v in enumerate(vals, 1):
-            ws2.cell(row=row_i, column=c, value=v)
-        _fill_row(ws2, row_i, len(e_hdrs), RED if "MISSING" in str(e.get("type")) else YELLOW)
+            ws_exc.cell(row=row_i, column=c, value=v)
+        _fill_row(ws_exc, row_i, len(e_hdrs), RED if "MISSING" in str(e.get("type")) else YELLOW)
 
-    _auto_width(ws2)
+    _auto_width(ws_exc)
 
     # -----------------------------------------------------------------------
-    # Sheet 3 — Bank Orphans
+    # Sheet 4 — Bank Orphans
     # -----------------------------------------------------------------------
-    ws3 = wb.create_sheet("Bank Orphans")
-    o_hdrs = ["Bank Sheet", "Bank Index", "Date", "Amount", "Description"]
-    _hdr(ws3, 1, o_hdrs, BROWN)
+    ws_orph = wb.create_sheet("Bank Orphans")
+    o_hdrs  = ["Bank Sheet", "Bank Index", "Date", "Amount", "Description"]
+    _hdr(ws_orph, 1, o_hdrs, BROWN)
 
     matched_bank_idx = {d.get("bank_index") for d in dec if d.get("bank_index") is not None}
     row_o = 2
@@ -150,18 +214,18 @@ def generate_report(output_dir: str = "output") -> dict:
                 b.get("description") or b.get("transaction_description") or "",
             ]
             for c, v in enumerate(vals, 1):
-                ws3.cell(row=row_o, column=c, value=v)
-            _fill_row(ws3, row_o, len(o_hdrs), RED)
+                ws_orph.cell(row=row_o, column=c, value=v)
+            _fill_row(ws_orph, row_o, len(o_hdrs), RED)
             row_o += 1
 
-    _auto_width(ws3)
+    _auto_width(ws_orph)
 
     # -----------------------------------------------------------------------
-    # Sheet 4 — Audit Log
+    # Sheet 5 — Audit Log
     # -----------------------------------------------------------------------
-    ws4 = wb.create_sheet("Audit Log")
-    ws4.column_dimensions["A"].width = 35
-    ws4.column_dimensions["B"].width = 28
+    ws_audit = wb.create_sheet("Audit Log")
+    ws_audit.column_dimensions["A"].width = 35
+    ws_audit.column_dimensions["B"].width = 28
 
     audit_rows = [
         ("--- RUN INFORMATION ---",              ""),
@@ -173,11 +237,11 @@ def generate_report(output_dir: str = "output") -> dict:
         ("--- INPUT ---",                        ""),
         ("Payment Type",                         audit.get("payment_type")),
         ("Input File",                           audit.get("input_file")),
-        ("AR Sheet",                             audit.get("ar_sheet")),
+        ("Source Sheet",                         audit.get("ar_sheet")),
         ("Bank Sheets",                          str(audit.get("bank_sheets", []))),
         ("", ""),
         ("--- RESULTS ---",                      ""),
-        ("Total AR Records",                     audit.get("ar_total_records")),
+        ("Total Source Records",                 audit.get("ar_total_records")),
         ("Matched",                              audit.get("matched_count")),
         ("Partial",                              audit.get("partial_count")),
         ("Unmatched",                            audit.get("unmatched_count")),
@@ -195,7 +259,7 @@ def generate_report(output_dir: str = "output") -> dict:
         ("GP Difference",                        audit.get("gp_difference")),
         ("", ""),
         ("--- STATUS ---",                       ""),
-        ("Reconciliation Status",               audit.get("recon_status")),
+        ("Reconciliation Status",                audit.get("recon_status")),
         ("Notes",                                audit.get("notes", "")),
         ("", ""),
         ("--- COLOUR LEGEND ---",                ""),
@@ -206,8 +270,8 @@ def generate_report(output_dir: str = "output") -> dict:
     ]
 
     for r, (label, val) in enumerate(audit_rows, 1):
-        ca = ws4.cell(row=r, column=1, value=label)
-        cb = ws4.cell(row=r, column=2, value=val)
+        ca = ws_audit.cell(row=r, column=1, value=label)
+        cb = ws_audit.cell(row=r, column=2, value=val)
         if label.startswith("---"):
             ca.font = Font(bold=True)
             ca.fill = DASH
@@ -216,11 +280,11 @@ def generate_report(output_dir: str = "output") -> dict:
             cb.fill = legend[label]
 
     # -----------------------------------------------------------------------
-    # Sheet 5 — Dashboard Summary
+    # Sheet 6 — Dashboard Summary
     # -----------------------------------------------------------------------
-    ws5 = wb.create_sheet("Dashboard")
-    ws5.column_dimensions["A"].width = 30
-    ws5.column_dimensions["B"].width = 20
+    ws_dash = wb.create_sheet("Dashboard")
+    ws_dash.column_dimensions["A"].width = 30
+    ws_dash.column_dimensions["B"].width = 20
 
     matched_cnt   = audit.get("matched_count", 0)
     unmatched_cnt = audit.get("unmatched_count", 0)
@@ -232,12 +296,13 @@ def generate_report(output_dir: str = "output") -> dict:
         ("BILLING RECONCILIATION DASHBOARD", ""),
         ("Payment Type",        ptype),
         ("Run Date",            datetime.now().strftime("%Y-%m-%d %H:%M")),
+        ("Mode",                "Generic" if generic_mode else "Legacy"),
         ("", ""),
         ("Match Rate",          f"{match_rate}%"),
         ("Matched",             matched_cnt),
         ("Partial",             partial_cnt),
         ("Unmatched",           unmatched_cnt),
-        ("Total AR Records",    total_ar),
+        ("Total Source Records", total_ar),
         ("", ""),
         ("Matched Amount",      f"${audit.get('matched_total_amount', 0):,.2f}"),
         ("Unmatched Amount",    f"${audit.get('unmatched_total_amount', 0):,.2f}"),
@@ -246,8 +311,8 @@ def generate_report(output_dir: str = "output") -> dict:
     ]
 
     for r, (label, val) in enumerate(dash_rows, 1):
-        ca = ws5.cell(row=r, column=1, value=label)
-        cb = ws5.cell(row=r, column=2, value=val)
+        ca = ws_dash.cell(row=r, column=1, value=label)
+        cb = ws_dash.cell(row=r, column=2, value=val)
         if r == 1:
             ca.font = Font(bold=True, size=14)
         if label == "Match Rate":
@@ -256,14 +321,20 @@ def generate_report(output_dir: str = "output") -> dict:
             status_fill = GREEN if val == "COMPLETE" else YELLOW if val == "PARTIAL" else RED
             cb.fill = status_fill
 
-    _auto_width(ws5)
+    _auto_width(ws_dash)
 
     wb.save(path)
     st["output_path"] = path
 
+    sheets = ["Recon Results"]
+    if matched_sheet_name:
+        sheets.append(matched_sheet_name)
+    sheets += ["Exceptions", "Bank Orphans", "Audit Log", "Dashboard"]
+
     return {
         "output_file":   path,
-        "sheets":        ["Recon Results", "Exceptions", "Bank Orphans", "Audit Log", "Dashboard"],
+        "sheets":        sheets,
+        "mode":          "generic" if generic_mode else "legacy",
         "audit_summary": {
             "matched_count":          matched_cnt,
             "unmatched_count":        unmatched_cnt,
